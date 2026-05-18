@@ -151,15 +151,15 @@ async function loadQuota() {
   try {
     const response = await apiFetch("/storage", { headers: authHeaders() });
     const quota = await response.json();
-    const limit = Number(quota.limit || 0);
-    const usage = Number(quota.usage || 0);
-    const drive = Number(quota.usageInDrive || 0);
+    const limit = Number(quota.userLimit || quota.limit || 0);
+    const usage = Number(quota.userUsage || quota.usage || 0);
+    const remaining = Number(quota.userRemaining || Math.max(limit - usage, 0));
     const percent = limit > 0 ? Math.min((usage / limit) * 100, 100) : 0;
 
     elements.quotaBar.style.width = `${percent}%`;
     elements.quotaTotal.textContent = formatBytes(limit);
     elements.quotaUsed.textContent = formatBytes(usage);
-    elements.quotaDrive.textContent = formatBytes(drive);
+    elements.quotaDrive.textContent = formatBytes(remaining);
   } catch (error) {
     setOutput(`ERROR:\n${error.message}`);
     showToast(error.message);
@@ -186,6 +186,10 @@ async function uploadFile() {
   const file = elements.fileInput.files[0];
   if (!file) {
     showToast("Choose a file first.");
+    return;
+  }
+  if (file.size > 25 * 1024 * 1024) {
+    showToast("Maximum upload size is 25 MB.");
     return;
   }
 

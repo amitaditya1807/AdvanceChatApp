@@ -22,7 +22,10 @@ import (
 	"google.golang.org/api/option"
 )
 
-const maxUploadBytes = 25 << 20
+const (
+	maxUploadBytes        = 25 << 20
+	userStorageLimitBytes = 100 << 20
+)
 
 type config struct {
 	Addr               string
@@ -136,17 +139,30 @@ func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Cloud Storage Service Running"})
 }
 
-func (s *server) storageInfo(w http.ResponseWriter, r *http.Request, _ authUser) {
+func (s *server) storageInfo(w http.ResponseWriter, r *http.Request, user authUser) {
 	about, err := s.drive.About.Get().Fields("storageQuota").Context(r.Context()).Do()
 	if err != nil {
 		writeDriveError(w, err)
 		return
 	}
 
+	userUsage, err := s.userStorageUsage(r.Context(), user)
+	if err != nil {
+		writeDriveError(w, err)
+		return
+	}
+	userRemaining := userStorageLimitBytes - userUsage
+	if userRemaining < 0 {
+		userRemaining = 0
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{
-		"limit":        strconv.FormatInt(about.StorageQuota.Limit, 10),
-		"usage":        strconv.FormatInt(about.StorageQuota.Usage, 10),
-		"usageInDrive": strconv.FormatInt(about.StorageQuota.UsageInDrive, 10),
+		"limit":         strconv.FormatInt(about.StorageQuota.Limit, 10),
+		"usage":         strconv.FormatInt(about.StorageQuota.Usage, 10),
+		"usageInDrive":  strconv.FormatInt(about.StorageQuota.UsageInDrive, 10),
+		"userLimit":     strconv.FormatInt(userStorageLimitBytes, 10),
+		"userUsage":     strconv.FormatInt(userUsage, 10),
+		"userRemaining": strconv.FormatInt(userRemaining, 10),
 	})
 }
 
@@ -163,6 +179,16 @@ func (s *server) uploadFile(w http.ResponseWriter, r *http.Request, user authUse
 		return
 	}
 	defer file.Close()
+
+	currentUsage, err := s.userStorageUsage(r.Context(), user)
+	if err != nil {
+		writeDriveError(w, err)
+		return
+	}
+	if currentUsage+header.Size > userStorageLimitBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("user storage limit exceeded: %s used, %s limit", formatBytes(currentUsage), formatBytes(userStorageLimitBytes)))
+		return
+	}
 
 	created, err := s.createDriveFile(r.Context(), user, header, file)
 	if err != nil {
@@ -190,16 +216,8 @@ func (s *server) createDriveFile(ctx context.Context, user authUser, header *mul
 }
 
 func (s *server) listFiles(w http.ResponseWriter, r *http.Request, user authUser) {
-	queryParts := []string{
-		"trashed = false",
-		fmt.Sprintf("appProperties has { key='userId' and value='%s' }", escapeDriveQuery(user.ID)),
-	}
-	if s.cfg.DriveRootFolderID != "" {
-		queryParts = append(queryParts, fmt.Sprintf("'%s' in parents", escapeDriveQuery(s.cfg.DriveRootFolderID)))
-	}
-
 	resp, err := s.drive.Files.List().
-		Q(strings.Join(queryParts, " and ")).
+		Q(s.userFilesQuery(user)).
 		Fields("files(id,name,mimeType,size,createdTime,modifiedTime)").
 		OrderBy("modifiedTime desc").
 		PageSize(100).
@@ -266,6 +284,45 @@ func (s *server) getOwnedFile(ctx context.Context, fileID string, user authUser)
 		return nil, &googleapi.Error{Code: http.StatusNotFound, Message: "file not found"}
 	}
 	return file, nil
+}
+
+func (s *server) userStorageUsage(ctx context.Context, user authUser) (int64, error) {
+	var total int64
+	pageToken := ""
+
+	for {
+		call := s.drive.Files.List().
+			Q(s.userFilesQuery(user)).
+			Fields("nextPageToken,files(size)").
+			PageSize(1000).
+			Context(ctx)
+		if pageToken != "" {
+			call.PageToken(pageToken)
+		}
+
+		resp, err := call.Do()
+		if err != nil {
+			return 0, err
+		}
+		for _, file := range resp.Files {
+			total += file.Size
+		}
+		if resp.NextPageToken == "" {
+			return total, nil
+		}
+		pageToken = resp.NextPageToken
+	}
+}
+
+func (s *server) userFilesQuery(user authUser) string {
+	queryParts := []string{
+		"trashed = false",
+		fmt.Sprintf("appProperties has { key='userId' and value='%s' }", escapeDriveQuery(user.ID)),
+	}
+	if s.cfg.DriveRootFolderID != "" {
+		queryParts = append(queryParts, fmt.Sprintf("'%s' in parents", escapeDriveQuery(s.cfg.DriveRootFolderID)))
+	}
+	return strings.Join(queryParts, " and ")
 }
 
 func (s *server) withAuth(next func(http.ResponseWriter, *http.Request, authUser)) http.HandlerFunc {
@@ -336,6 +393,21 @@ func parseDriveTime(value string) time.Time {
 
 func escapeDriveQuery(value string) string {
 	return strings.ReplaceAll(value, "'", "\\'")
+}
+
+func formatBytes(bytes int64) string {
+	if bytes < 1024 {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	units := []string{"KB", "MB", "GB", "TB"}
+	value := float64(bytes)
+	for _, unit := range units {
+		value = value / 1024
+		if value < 1024 || unit == units[len(units)-1] {
+			return fmt.Sprintf("%.1f %s", value, unit)
+		}
+	}
+	return fmt.Sprintf("%d B", bytes)
 }
 
 func withCORS(next http.Handler) http.Handler {
