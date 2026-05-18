@@ -2,6 +2,7 @@ const elements = {
   apiBase: document.querySelector("#apiBase"),
   jwtToken: document.querySelector("#jwtToken"),
   serviceStatus: document.querySelector("#serviceStatus"),
+  tokenStatus: document.querySelector("#tokenStatus"),
   saveApiButton: document.querySelector("#saveApiButton"),
   saveTokenButton: document.querySelector("#saveTokenButton"),
   clearTokenButton: document.querySelector("#clearTokenButton"),
@@ -10,22 +11,36 @@ const elements = {
   uploadButton: document.querySelector("#uploadButton"),
   fileInput: document.querySelector("#fileInput"),
   uploadHint: document.querySelector("#uploadHint"),
+  dropZone: document.querySelector("#dropZone"),
+  selectedFileName: document.querySelector("#selectedFileName"),
+  selectedFileMeta: document.querySelector("#selectedFileMeta"),
   quotaBar: document.querySelector("#quotaBar"),
+  quotaPercent: document.querySelector("#quotaPercent"),
   quotaPlan: document.querySelector("#quotaPlan"),
   quotaTotal: document.querySelector("#quotaTotal"),
   quotaUsed: document.querySelector("#quotaUsed"),
   quotaDrive: document.querySelector("#quotaDrive"),
+  fileCount: document.querySelector("#fileCount"),
+  totalFileSize: document.querySelector("#totalFileSize"),
+  largestFile: document.querySelector("#largestFile"),
+  lastSync: document.querySelector("#lastSync"),
+  fileSearchInput: document.querySelector("#fileSearchInput"),
+  fileSortSelect: document.querySelector("#fileSortSelect"),
+  fileSummary: document.querySelector("#fileSummary"),
   filesBody: document.querySelector("#filesBody"),
   toast: document.querySelector("#toast"),
 };
 
 const USER_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024;
 const PREMIUM_STORAGE_LIMIT_BYTES = 200 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const storageKeys = {
   apiBase: "cloudStorage.apiBase",
   token: "cloudStorage.jwt",
 };
+
+let currentFiles = [];
 
 function getApiBase() {
   return elements.apiBase.value.trim().replace(/\/+$/, "");
@@ -74,15 +89,26 @@ async function readError(response) {
 async function checkService() {
   try {
     await apiFetch("/");
-    setStatus("Service online", "ok");
-  } catch (error) {
-    setStatus("Service offline", "bad");
+    setStatus(elements.serviceStatus, "Service online", "ok");
+  } catch {
+    setStatus(elements.serviceStatus, "Service offline", "bad");
   }
 }
 
-function setStatus(text, state) {
-  elements.serviceStatus.textContent = text;
-  elements.serviceStatus.className = `status ${state}`;
+function setStatus(element, text, state) {
+  element.textContent = text;
+  element.className = `status ${state || ""}`.trim();
+}
+
+function renderTokenState() {
+  const hasToken = Boolean(getToken());
+  setStatus(elements.tokenStatus, hasToken ? "Ready" : "No token", hasToken ? "ready" : "bad");
+  elements.refreshQuotaButton.disabled = !hasToken;
+  elements.refreshFilesButton.disabled = !hasToken;
+  elements.uploadButton.disabled = !hasToken;
+  elements.fileInput.disabled = !hasToken;
+  elements.dropZone.classList.toggle("disabled", !hasToken);
+  elements.dropZone.setAttribute("aria-disabled", String(!hasToken));
 }
 
 async function loadQuota() {
@@ -98,14 +124,29 @@ async function loadQuota() {
     const remaining = Math.max(limit - usage, 0);
     const percent = limit > 0 ? Math.min((usage / limit) * 100, 100) : 0;
 
-    elements.quotaBar.style.width = `${percent}%`;
+    setQuotaMeter(percent);
     elements.quotaPlan.textContent = formatPlan(plan);
     elements.quotaTotal.textContent = formatBytes(limit);
     elements.quotaUsed.textContent = formatBytes(usage);
     elements.quotaDrive.textContent = formatBytes(remaining);
+    updateLastSync();
   } catch (error) {
     showToast(error.message);
   }
+}
+
+function setQuotaMeter(percent) {
+  elements.quotaBar.style.width = `${percent}%`;
+  elements.quotaBar.className = percent >= 95 ? "danger" : percent >= 80 ? "warning" : "";
+  elements.quotaPercent.textContent = `${formatPercent(percent)}%`;
+}
+
+function resetQuota() {
+  setQuotaMeter(0);
+  elements.quotaPlan.textContent = "-";
+  elements.quotaTotal.textContent = "-";
+  elements.quotaUsed.textContent = "-";
+  elements.quotaDrive.textContent = "-";
 }
 
 async function loadFiles() {
@@ -116,6 +157,7 @@ async function loadFiles() {
     });
     const data = await response.json();
     renderFiles(data.files || []);
+    updateLastSync();
   } catch (error) {
     setFilesMessage(error.message);
     showToast(error.message);
@@ -128,7 +170,7 @@ async function uploadFile() {
     showToast("Choose a file first.");
     return;
   }
-  if (file.size > 25 * 1024 * 1024) {
+  if (file.size > MAX_UPLOAD_BYTES) {
     showToast("Maximum upload size is 25 MB.");
     return;
   }
@@ -145,6 +187,7 @@ async function uploadFile() {
       body: form,
     });
     elements.fileInput.value = "";
+    updateSelectedFile();
     elements.uploadHint.textContent = "Upload complete.";
     showToast("File uploaded.");
     await Promise.all([loadQuota(), loadFiles()]);
@@ -152,7 +195,7 @@ async function uploadFile() {
     elements.uploadHint.textContent = error.message;
     showToast(error.message);
   } finally {
-    elements.uploadButton.disabled = false;
+    renderTokenState();
   }
 }
 
@@ -194,30 +237,47 @@ async function deleteFile(file) {
 }
 
 function renderFiles(files) {
+  currentFiles = Array.isArray(files) ? files : [];
+  updateFileStats(currentFiles);
+  applyFilesView();
+}
+
+function applyFilesView() {
+  const visibleFiles = sortFiles(filterFiles(currentFiles));
+  updateFileSummary(visibleFiles);
+
   elements.filesBody.innerHTML = "";
-  if (files.length === 0) {
+  if (currentFiles.length === 0) {
     setFilesMessage("No files uploaded yet.");
     return;
   }
 
-  for (const file of files) {
+  if (visibleFiles.length === 0) {
+    setFilesMessage("No files match your search.");
+    return;
+  }
+
+  for (const file of visibleFiles) {
     const row = document.createElement("tr");
     row.innerHTML = `
       <td><div class="file-name"></div></td>
-      <td></td>
+      <td><span class="type-pill"></span></td>
       <td></td>
       <td></td>
       <td><div class="file-actions"></div></td>
     `;
 
     row.children[0].querySelector(".file-name").textContent = file.name || "-";
-    row.children[1].textContent = file.mimeType || "-";
+    const typePill = row.children[1].querySelector(".type-pill");
+    typePill.textContent = formatMimeType(file.mimeType);
+    typePill.title = file.mimeType || "Unknown type";
     row.children[2].textContent = formatBytes(Number(file.size || 0));
     row.children[3].textContent = formatDate(file.modifiedTime);
 
     const actions = row.children[4].querySelector(".file-actions");
     const downloadButton = document.createElement("button");
     downloadButton.type = "button";
+    downloadButton.className = "secondary";
     downloadButton.textContent = "Download";
     downloadButton.addEventListener("click", () => downloadFile(file));
 
@@ -232,9 +292,129 @@ function renderFiles(files) {
   }
 }
 
+function filterFiles(files) {
+  const query = elements.fileSearchInput.value.trim().toLowerCase();
+  if (!query) return files;
+
+  return files.filter((file) => {
+    const name = String(file.name || "").toLowerCase();
+    const type = String(file.mimeType || "").toLowerCase();
+    return name.includes(query) || type.includes(query);
+  });
+}
+
+function sortFiles(files) {
+  const sorted = [...files];
+  switch (elements.fileSortSelect.value) {
+    case "name-asc":
+      sorted.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+      break;
+    case "size-desc":
+      sorted.sort((a, b) => Number(b.size || 0) - Number(a.size || 0));
+      break;
+    case "type-asc":
+      sorted.sort((a, b) => String(a.mimeType || "").localeCompare(String(b.mimeType || "")));
+      break;
+    case "modified-desc":
+    default:
+      sorted.sort((a, b) => dateValue(b.modifiedTime) - dateValue(a.modifiedTime));
+      break;
+  }
+  return sorted;
+}
+
 function setFilesMessage(message) {
   elements.filesBody.innerHTML = `<tr><td colspan="5" class="empty"></td></tr>`;
   elements.filesBody.querySelector("td").textContent = message;
+}
+
+function updateFileStats(files) {
+  const totalBytes = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
+  const largest = files.reduce((winner, file) => {
+    return Number(file.size || 0) > Number(winner?.size || 0) ? file : winner;
+  }, null);
+
+  elements.fileCount.textContent = String(files.length);
+  elements.totalFileSize.textContent = formatBytes(totalBytes);
+  elements.largestFile.textContent = largest ? formatBytes(Number(largest.size || 0)) : "-";
+}
+
+function updateFileSummary(visibleFiles) {
+  const totalBytes = visibleFiles.reduce((sum, file) => sum + Number(file.size || 0), 0);
+  if (currentFiles.length === 0) {
+    elements.fileSummary.textContent = "No files loaded yet.";
+    return;
+  }
+
+  if (visibleFiles.length !== currentFiles.length) {
+    const totalLabel = currentFiles.length === 1 ? "file" : "files";
+    elements.fileSummary.textContent = `${visibleFiles.length} of ${currentFiles.length} ${totalLabel} shown - ${formatBytes(totalBytes)}`;
+    return;
+  }
+
+  const fileLabel = visibleFiles.length === 1 ? "file" : "files";
+  elements.fileSummary.textContent = `${visibleFiles.length} ${fileLabel} - ${formatBytes(totalBytes)} total`;
+}
+
+function updateSelectedFile() {
+  const file = elements.fileInput.files[0];
+  elements.dropZone.classList.toggle("file-too-large", Boolean(file && file.size > MAX_UPLOAD_BYTES));
+
+  if (!file) {
+    elements.selectedFileName.textContent = "No file selected";
+    elements.selectedFileMeta.textContent = "Drop a file here or browse from your device.";
+    elements.uploadHint.textContent = "Maximum upload size is 25 MB.";
+    return;
+  }
+
+  elements.selectedFileName.textContent = file.name;
+  elements.selectedFileMeta.textContent = `${formatBytes(file.size)} - ${file.type || "Unknown type"}`;
+  elements.uploadHint.textContent = file.size > MAX_UPLOAD_BYTES
+    ? "This file is larger than the 25 MB upload limit."
+    : "Ready to upload.";
+}
+
+function setupDropZone() {
+  ["dragenter", "dragover"].forEach((eventName) => {
+    elements.dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      elements.dropZone.classList.add("drag-over");
+    });
+  });
+
+  ["dragleave", "drop"].forEach((eventName) => {
+    elements.dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      elements.dropZone.classList.remove("drag-over");
+    });
+  });
+
+  elements.dropZone.addEventListener("drop", (event) => {
+    if (event.dataTransfer?.files?.length) {
+      elements.fileInput.files = event.dataTransfer.files;
+      updateSelectedFile();
+    }
+  });
+
+  elements.dropZone.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      elements.fileInput.click();
+    }
+  });
+}
+
+function updateLastSync() {
+  elements.lastSync.textContent = new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function dateValue(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
 function formatBytes(bytes) {
@@ -247,8 +427,25 @@ function formatBytes(bytes) {
   return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
+function formatPercent(value) {
+  return value > 0 && value < 10 ? value.toFixed(1) : String(Math.round(value));
+}
+
 function formatPlan(plan) {
   return plan === "premium" ? "Premium" : "Free";
+}
+
+function formatMimeType(value) {
+  if (!value) return "Unknown";
+  if (value === "application/pdf") return "PDF";
+  if (value.startsWith("image/")) return "Image";
+  if (value.startsWith("video/")) return "Video";
+  if (value.startsWith("audio/")) return "Audio";
+  if (value.startsWith("text/")) return "Text";
+  if (value.includes("spreadsheet")) return "Spreadsheet";
+  if (value.includes("presentation")) return "Presentation";
+  if (value.includes("document") || value.includes("word")) return "Document";
+  return value.split("/").pop().replace(/[.+-]/g, " ").trim() || value;
 }
 
 function formatDate(value) {
@@ -279,7 +476,14 @@ function saveApiBase() {
 }
 
 function saveToken() {
+  if (!getToken()) {
+    renderTokenState();
+    showToast("Paste a token first.");
+    return;
+  }
+
   localStorage.setItem(storageKeys.token, getToken());
+  renderTokenState();
   showToast("Token saved.");
   Promise.all([loadQuota(), loadFiles()]);
 }
@@ -287,6 +491,10 @@ function saveToken() {
 function clearToken() {
   elements.jwtToken.value = "";
   localStorage.removeItem(storageKeys.token);
+  currentFiles = [];
+  renderFiles([]);
+  resetQuota();
+  renderTokenState();
   showToast("Token cleared.");
 }
 
@@ -300,8 +508,15 @@ function init() {
   elements.refreshQuotaButton.addEventListener("click", loadQuota);
   elements.refreshFilesButton.addEventListener("click", loadFiles);
   elements.uploadButton.addEventListener("click", uploadFile);
+  elements.fileInput.addEventListener("change", updateSelectedFile);
+  elements.fileSearchInput.addEventListener("input", applyFilesView);
+  elements.fileSortSelect.addEventListener("change", applyFilesView);
+  elements.jwtToken.addEventListener("input", renderTokenState);
+  setupDropZone();
 
   checkService();
+  updateSelectedFile();
+  renderTokenState();
   if (getToken()) {
     Promise.all([loadQuota(), loadFiles()]);
   }

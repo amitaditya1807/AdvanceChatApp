@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="./cloudstorage.css" />
 </head>
 <body>
-  <main class="page">
+  <main class="page cloud-page">
     <header class="hero panel cloud-hero">
       <div class="hero__left">
         <div class="hero-topline">
@@ -18,8 +18,22 @@
             <button class="secondary compact" onclick="goHome()">Home</button>
           </div>
         </div>
-        <h1>Files</h1>
-        <p class="subtitle">Upload, download, and remove files from your cloud storage. Each user gets 100 MB of space.</p>
+        <h1>CloudStorage</h1>
+        <p class="subtitle">A cleaner workspace for uploads, downloads, quota tracking, and file housekeeping.</p>
+        <div class="hero-metrics" aria-label="Storage overview">
+          <div class="metric-card">
+            <span>Files</span>
+            <strong id="fileCount">0</strong>
+          </div>
+          <div class="metric-card">
+            <span>Total Size</span>
+            <strong id="totalFileSize">0 B</strong>
+          </div>
+          <div class="metric-card">
+            <span>Largest</span>
+            <strong id="largestFile">-</strong>
+          </div>
+        </div>
       </div>
 
       <div class="status-grid">
@@ -34,16 +48,23 @@
             <button id="saveApiButton" class="secondary compact" type="button">Save</button>
           </div>
         </div>
+        <div class="status-card">
+          <div class="status-label">Last Sync</div>
+          <div id="lastSync" class="sync-time">Not synced yet</div>
+        </div>
       </div>
     </header>
 
-    <section class="panel chat-card storage-grid">
-      <div class="quota-panel">
+    <section class="cloud-dashboard">
+      <div class="panel chat-card quota-panel">
         <div class="section-title">
           <h2>Your Storage</h2>
           <button id="refreshQuotaButton" class="secondary compact" type="button">Refresh</button>
         </div>
-        <div class="meter"><div id="quotaBar"></div></div>
+        <div class="meter-row">
+          <div class="meter"><div id="quotaBar"></div></div>
+          <strong id="quotaPercent" class="quota-percent">0%</strong>
+        </div>
         <div class="quota-grid">
           <div>
             <span>Plan</span>
@@ -64,19 +85,39 @@
         </div>
       </div>
 
-      <div class="upload-panel">
-        <div class="section-title"><h2>Upload</h2></div>
-        <input id="fileInput" type="file" />
+      <div class="panel chat-card upload-panel">
+        <div class="section-title">
+          <h2>Upload</h2>
+        </div>
+        <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Choose a file to upload">
+          <input id="fileInput" type="file" />
+          <div class="drop-zone__copy">
+            <strong id="selectedFileName">No file selected</strong>
+            <span id="selectedFileMeta">Drop a file here or browse from your device.</span>
+          </div>
+        </div>
         <button id="uploadButton" class="primary" type="button">Upload File</button>
         <p id="uploadHint" class="hint">Maximum upload size is 25 MB.</p>
       </div>
     </section>
 
-    <section class="panel chat-card">
+    <section class="panel chat-card files-panel">
       <div class="section-title">
         <h2>Your Files</h2>
-        <button id="refreshFilesButton" class="secondary compact" type="button">Refresh</button>
+        <div class="files-toolbar">
+          <label class="visually-hidden" for="fileSearchInput">Search files</label>
+          <input id="fileSearchInput" class="search-input" type="search" placeholder="Search files" />
+          <label class="visually-hidden" for="fileSortSelect">Sort files</label>
+          <select id="fileSortSelect" class="sort-select">
+            <option value="modified-desc">Newest first</option>
+            <option value="name-asc">Name A-Z</option>
+            <option value="size-desc">Largest first</option>
+            <option value="type-asc">Type A-Z</option>
+          </select>
+          <button id="refreshFilesButton" class="secondary compact" type="button">Refresh</button>
+        </div>
       </div>
+      <div id="fileSummary" class="file-summary">No files loaded yet.</div>
       <div class="table-wrap">
         <table>
           <thead>

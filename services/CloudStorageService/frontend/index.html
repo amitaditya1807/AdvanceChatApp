@@ -8,26 +8,58 @@
   </head>
   <body>
     <main class="shell">
-      <section class="topbar">
+      <section class="hero-panel">
         <div>
           <p class="eyebrow">ChatApp</p>
-          <h1>Cloud Storage</h1>
+          <h1>Cloud Storage Service</h1>
+          <p class="subtitle">A direct console for checking service health, quota, uploads, and user-owned Drive files.</p>
         </div>
-        <div class="status" id="serviceStatus">Checking service...</div>
+        <div class="hero-status">
+          <div class="status-card">
+            <span>Service</span>
+            <strong class="status" id="serviceStatus">Checking...</strong>
+          </div>
+          <div class="status-card">
+            <span>Token</span>
+            <strong class="status" id="tokenStatus">No token</strong>
+          </div>
+        </div>
       </section>
 
       <section class="panel auth-panel">
+        <div class="section-heading">
+          <h2>Connection</h2>
+          <button id="saveApiButton" class="secondary" type="button">Save API</button>
+        </div>
         <label for="apiBase">API base URL</label>
         <div class="row">
           <input id="apiBase" value="http://localhost:8082" />
-          <button id="saveApiButton" type="button">Save</button>
         </div>
 
         <label for="jwtToken">Auth service JWT</label>
-        <textarea id="jwtToken" rows="5" placeholder="Paste JWT from Auth service"></textarea>
+        <textarea id="jwtToken" rows="4" placeholder="Paste JWT from Auth service"></textarea>
         <div class="actions">
           <button id="saveTokenButton" type="button">Save Token</button>
           <button id="clearTokenButton" class="secondary" type="button">Clear</button>
+        </div>
+      </section>
+
+      <section class="metrics-grid" aria-label="File overview">
+        <div class="metric-card">
+          <span>Files</span>
+          <strong id="fileCount">0</strong>
+        </div>
+        <div class="metric-card">
+          <span>Total Size</span>
+          <strong id="totalFileSize">0 B</strong>
+        </div>
+        <div class="metric-card">
+          <span>Largest</span>
+          <strong id="largestFile">-</strong>
+        </div>
+        <div class="metric-card">
+          <span>Last Sync</span>
+          <strong id="lastSync">Not synced</strong>
         </div>
       </section>
 
@@ -35,10 +67,13 @@
         <div class="panel quota-panel">
           <div class="section-heading">
             <h2>Your Storage</h2>
-            <button id="refreshQuotaButton" type="button">Refresh</button>
+            <button id="refreshQuotaButton" class="secondary" type="button">Refresh</button>
           </div>
-          <div class="meter">
-            <div id="quotaBar"></div>
+          <div class="meter-row">
+            <div class="meter">
+              <div id="quotaBar"></div>
+            </div>
+            <strong id="quotaPercent" class="quota-percent">0%</strong>
           </div>
           <div class="quota-grid">
             <div>
@@ -64,17 +99,35 @@
           <div class="section-heading">
             <h2>Upload</h2>
           </div>
-          <input id="fileInput" type="file" />
+          <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Choose a file to upload">
+            <input id="fileInput" type="file" />
+            <div class="drop-zone__copy">
+              <strong id="selectedFileName">No file selected</strong>
+              <span id="selectedFileMeta">Drop a file here or browse from your device.</span>
+            </div>
+          </div>
           <button id="uploadButton" type="button">Upload File</button>
           <p class="hint" id="uploadHint">Maximum upload size is 25 MB.</p>
         </div>
       </section>
 
       <section class="panel files-panel">
-        <div class="section-heading">
+        <div class="section-heading files-heading">
           <h2>Files</h2>
-          <button id="refreshFilesButton" type="button">Refresh</button>
+          <div class="files-toolbar">
+            <label class="visually-hidden" for="fileSearchInput">Search files</label>
+            <input id="fileSearchInput" class="search-input" type="search" placeholder="Search files" />
+            <label class="visually-hidden" for="fileSortSelect">Sort files</label>
+            <select id="fileSortSelect" class="sort-select">
+              <option value="modified-desc">Newest first</option>
+              <option value="name-asc">Name A-Z</option>
+              <option value="size-desc">Largest first</option>
+              <option value="type-asc">Type A-Z</option>
+            </select>
+            <button id="refreshFilesButton" class="secondary" type="button">Refresh</button>
+          </div>
         </div>
+        <div id="fileSummary" class="file-summary">No files loaded yet.</div>
         <div class="table-wrap">
           <table>
             <thead>
