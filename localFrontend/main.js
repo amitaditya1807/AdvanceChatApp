@@ -117,13 +117,25 @@ async function callChatService() {
     });
 
     const text = await response.text();
+    const contentType = response.headers.get("content-type") || "";
     let body = text;
-    try { body = text ? JSON.parse(text) : null; } catch {}
+    try { body = text && contentType.includes("application/json") ? JSON.parse(text) : text; } catch {}
 
     if (!response.ok) {
       if (response.status === 401) {
-        logout();
-        output.textContent = "Your session expired. Please sign in again.";
+        if (!isTokenActive(token)) {
+          logout();
+          output.textContent = "Your session expired. Please sign in again.";
+          return;
+        }
+        output.textContent = [
+          "ChatService rejected the current JWT.",
+          "Check that AuthService and ChatService use the same Jwt:Key, Jwt:Issuer, and Jwt:Audience."
+        ].join("\n");
+        return;
+      }
+      if ([502, 503, 504].includes(response.status)) {
+        output.textContent = `ChatService is not reachable through the gateway right now.\nStatus: ${response.status}\nTry again after the Render service finishes waking up.`;
         return;
       }
       output.textContent = `❌ ERROR:\nStatus: ${response.status}\n${typeof body === "string" ? body : JSON.stringify(body, null, 2)}`;
