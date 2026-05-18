@@ -23,12 +23,18 @@ const elements = {
 
 let token = readTokenFromUrl() || localStorage.getItem(TOKEN_KEY) || "";
 
-if (token) {
+if (token && isTokenActive(token)) {
   localStorage.setItem(TOKEN_KEY, token);
   removeTokenFromUrl();
 } else {
-  window.location.replace("../index.html?authRequired=cloudstorage");
+  redirectHome(token ? "expired" : "");
 }
+
+window.addEventListener("storage", (event) => {
+  if (event.key === TOKEN_KEY && !isTokenActive(event.newValue || "")) {
+    redirectHome("expired");
+  }
+});
 
 function readTokenFromUrl() {
   const query = new URLSearchParams(window.location.search);
@@ -38,6 +44,30 @@ function readTokenFromUrl() {
 
 function removeTokenFromUrl() {
   window.history.replaceState({}, document.title, window.location.pathname || "/");
+}
+
+function redirectHome(reason = "") {
+  localStorage.removeItem(TOKEN_KEY);
+  const suffix = reason ? `&reason=${encodeURIComponent(reason)}` : "";
+  window.location.replace(`../index.html?authRequired=cloudstorage${suffix}`);
+}
+
+function decodeJwtPayload(jwt) {
+  try {
+    const payload = jwt.split(".")[1];
+    if (!payload) return null;
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(base64.length + ((4 - base64.length % 4) % 4), "=");
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
+function isTokenActive(jwt) {
+  const payload = decodeJwtPayload(jwt);
+  if (!payload) return false;
+  return !payload.exp || payload.exp * 1000 > Date.now();
 }
 
 function getApiBase() {
@@ -57,6 +87,10 @@ async function apiFetch(path, options = {}) {
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      redirectHome("expired");
+      return response;
+    }
     const message = await readError(response);
     throw new Error(message || `Request failed with ${response.status}`);
   }

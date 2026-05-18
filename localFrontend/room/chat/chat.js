@@ -19,8 +19,8 @@ let heartbeatTimer = null;
 let joinedPeople = [];
 
 roomTitle.textContent = decodeURIComponent(roomName);
-if (!token) {
-  window.location.replace("../../index.html?authRequired=room");
+if (!isTokenActive(token)) {
+  redirectHome(token ? "expired" : "");
 } else if (!roomId || !password) {
   roomMeta.textContent = "Missing room or password.";
 } else {
@@ -30,6 +30,11 @@ if (!token) {
 }
 
 window.addEventListener("beforeunload", stopLiveRoomUpdates);
+window.addEventListener("storage", (event) => {
+  if (event.key === TOKEN_KEY && !isTokenActive(event.newValue || "")) {
+    redirectHome("expired");
+  }
+});
 
 function goHome() {
   location.href = "../../index.html";
@@ -37,6 +42,13 @@ function goHome() {
 
 function goBack() {
   location.href = "../index.html";
+}
+
+function redirectHome(reason = "") {
+  stopLiveRoomUpdates();
+  localStorage.removeItem(TOKEN_KEY);
+  const suffix = reason ? `&reason=${encodeURIComponent(reason)}` : "";
+  window.location.replace(`../../index.html?authRequired=room${suffix}`);
 }
 
 function handleKey(e) {
@@ -59,6 +71,10 @@ async function api(path, options = {}) {
   try { body = text ? JSON.parse(text) : null; } catch { body = text; }
 
   if (!res.ok) {
+    if (res.status === 401) {
+      redirectHome("expired");
+      return null;
+    }
     const message = typeof body === "string" ? body : (body?.error || `Status ${res.status}`);
     throw new Error(message);
   }
@@ -174,12 +190,19 @@ function showPeopleList() {
 function decodeJwtPayload(jwt) {
   try {
     const payload = jwt.split(".")[1];
+    if (!payload) return null;
     const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
     const padded = base64.padEnd(base64.length + ((4 - base64.length % 4) % 4), "=");
     return JSON.parse(atob(padded));
   } catch {
     return null;
   }
+}
+
+function isTokenActive(jwt) {
+  const payload = decodeJwtPayload(jwt);
+  if (!payload) return false;
+  return !payload.exp || payload.exp * 1000 > Date.now();
 }
 
 function getCurrentUserId() {
