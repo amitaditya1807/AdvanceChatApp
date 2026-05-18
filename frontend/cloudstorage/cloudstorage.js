@@ -1,6 +1,7 @@
 const TOKEN_KEY = "advanced_chat_jwt";
 const API_BASE_KEY = "cloudStorage.apiBase";
 const DEFAULT_API_BASE = "https://apigateway1-khy4.onrender.com/cloudstorage";
+const USER_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024;
 
 const elements = {
   sessionPill: document.getElementById("sessionPill"),
@@ -151,9 +152,9 @@ async function loadQuota() {
   try {
     const response = await apiFetch("/storage", { headers: authHeaders() });
     const quota = await response.json();
-    const limit = Number(quota.userLimit || quota.limit || 0);
-    const usage = Number(quota.userUsage || quota.usage || 0);
-    const remaining = Number(quota.userRemaining || Math.max(limit - usage, 0));
+    const limit = Number(quota.userLimit || USER_STORAGE_LIMIT_BYTES);
+    const usage = Number(quota.userUsage || 0);
+    const remaining = Math.max(limit - usage, 0);
     const percent = limit > 0 ? Math.min((usage / limit) * 100, 100) : 0;
 
     elements.quotaBar.style.width = `${percent}%`;
