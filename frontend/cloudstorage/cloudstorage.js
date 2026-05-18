@@ -2,6 +2,7 @@ const TOKEN_KEY = "advanced_chat_jwt";
 const API_BASE_KEY = "cloudStorage.apiBase";
 const DEFAULT_API_BASE = "https://apigateway1-khy4.onrender.com/cloudstorage";
 const USER_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024;
+const PREMIUM_STORAGE_LIMIT_BYTES = 200 * 1024 * 1024;
 
 const elements = {
   sessionPill: document.getElementById("sessionPill"),
@@ -14,6 +15,7 @@ const elements = {
   fileInput: document.getElementById("fileInput"),
   uploadHint: document.getElementById("uploadHint"),
   quotaBar: document.getElementById("quotaBar"),
+  quotaPlan: document.getElementById("quotaPlan"),
   quotaTotal: document.getElementById("quotaTotal"),
   quotaUsed: document.getElementById("quotaUsed"),
   quotaDrive: document.getElementById("quotaDrive"),
@@ -152,12 +154,15 @@ async function loadQuota() {
   try {
     const response = await apiFetch("/storage", { headers: authHeaders() });
     const quota = await response.json();
-    const limit = Number(quota.userLimit || USER_STORAGE_LIMIT_BYTES);
+    const plan = quota.plan || "free";
+    const fallbackLimit = plan === "premium" ? PREMIUM_STORAGE_LIMIT_BYTES : USER_STORAGE_LIMIT_BYTES;
+    const limit = Number(quota.userLimit || fallbackLimit);
     const usage = Number(quota.userUsage || 0);
     const remaining = Math.max(limit - usage, 0);
     const percent = limit > 0 ? Math.min((usage / limit) * 100, 100) : 0;
 
     elements.quotaBar.style.width = `${percent}%`;
+    elements.quotaPlan.textContent = formatPlan(plan);
     elements.quotaTotal.textContent = formatBytes(limit);
     elements.quotaUsed.textContent = formatBytes(usage);
     elements.quotaDrive.textContent = formatBytes(remaining);
@@ -310,6 +315,10 @@ function formatBytes(bytes) {
   const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / 1024 ** index;
   return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function formatPlan(plan) {
+  return plan === "premium" ? "Premium" : "Free";
 }
 
 function formatDate(value) {

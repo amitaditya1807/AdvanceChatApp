@@ -23,8 +23,11 @@ import (
 )
 
 const (
-	maxUploadBytes        = 25 << 20
-	userStorageLimitBytes = 100 << 20
+	maxUploadBytes            = 25 << 20
+	freeUserStorageLimitBytes = 100 << 20
+	premiumUserLimitBytes     = 200 << 20
+	freeStoragePlanName       = "free"
+	premiumStoragePlanName    = "premium"
 )
 
 type config struct {
@@ -36,6 +39,8 @@ type config struct {
 	GoogleClientSecret string
 	GoogleRefreshToken string
 	DriveRootFolderID  string
+	PremiumUserIDs     map[string]struct{}
+	PremiumUserEmails  map[string]struct{}
 }
 
 type server struct {
@@ -102,6 +107,8 @@ func loadConfig() config {
 		GoogleClientSecret: getenvAny([]string{"GOOGLE_CLIENT_SECRET", "Google__ClientSecret"}, ""),
 		GoogleRefreshToken: getenvAny([]string{"GOOGLE_REFRESH_TOKEN", "Google__RefreshToken"}, ""),
 		DriveRootFolderID:  getenvAny([]string{"DRIVE_ROOT_FOLDER_ID", "Google__DriveRootFolderId"}, ""),
+		PremiumUserIDs:     parseCSVSet(getenvAny([]string{"PREMIUM_USER_IDS", "Premium__UserIds"}, "")),
+		PremiumUserEmails:  parseCSVSet(getenvAny([]string{"PREMIUM_USER_EMAILS", "Premium__UserEmails"}, "")),
 	}
 }
 
@@ -151,7 +158,8 @@ func (s *server) storageInfo(w http.ResponseWriter, r *http.Request, user authUs
 		writeDriveError(w, err)
 		return
 	}
-	userRemaining := userStorageLimitBytes - userUsage
+	planName, userLimit := s.userStoragePlan(user)
+	userRemaining := userLimit - userUsage
 	if userRemaining < 0 {
 		userRemaining = 0
 	}
@@ -160,7 +168,8 @@ func (s *server) storageInfo(w http.ResponseWriter, r *http.Request, user authUs
 		"limit":         strconv.FormatInt(about.StorageQuota.Limit, 10),
 		"usage":         strconv.FormatInt(about.StorageQuota.Usage, 10),
 		"usageInDrive":  strconv.FormatInt(about.StorageQuota.UsageInDrive, 10),
-		"userLimit":     strconv.FormatInt(userStorageLimitBytes, 10),
+		"plan":          planName,
+		"userLimit":     strconv.FormatInt(userLimit, 10),
 		"userUsage":     strconv.FormatInt(userUsage, 10),
 		"userRemaining": strconv.FormatInt(userRemaining, 10),
 	})
@@ -185,8 +194,9 @@ func (s *server) uploadFile(w http.ResponseWriter, r *http.Request, user authUse
 		writeDriveError(w, err)
 		return
 	}
-	if currentUsage+header.Size > userStorageLimitBytes {
-		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("user storage limit exceeded: %s used, %s limit", formatBytes(currentUsage), formatBytes(userStorageLimitBytes)))
+	planName, userLimit := s.userStoragePlan(user)
+	if currentUsage+header.Size > userLimit {
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("%s storage limit exceeded: %s used, %s limit", planName, formatBytes(currentUsage), formatBytes(userLimit)))
 		return
 	}
 
@@ -323,6 +333,16 @@ func (s *server) userFilesQuery(user authUser) string {
 		queryParts = append(queryParts, fmt.Sprintf("'%s' in parents", escapeDriveQuery(s.cfg.DriveRootFolderID)))
 	}
 	return strings.Join(queryParts, " and ")
+}
+
+func (s *server) userStoragePlan(user authUser) (string, int64) {
+	if _, ok := s.cfg.PremiumUserIDs[user.ID]; ok {
+		return premiumStoragePlanName, premiumUserLimitBytes
+	}
+	if _, ok := s.cfg.PremiumUserEmails[strings.ToLower(user.Email)]; ok {
+		return premiumStoragePlanName, premiumUserLimitBytes
+	}
+	return freeStoragePlanName, freeUserStorageLimitBytes
 }
 
 func (s *server) withAuth(next func(http.ResponseWriter, *http.Request, authUser)) http.HandlerFunc {
@@ -469,6 +489,17 @@ func getenvAny(keys []string, fallback string) string {
 		}
 	}
 	return fallback
+}
+
+func parseCSVSet(value string) map[string]struct{} {
+	items := make(map[string]struct{})
+	for _, item := range strings.Split(value, ",") {
+		item = strings.ToLower(strings.TrimSpace(item))
+		if item != "" {
+			items[item] = struct{}{}
+		}
+	}
+	return items
 }
 
 func loadDotEnv(path string) error {

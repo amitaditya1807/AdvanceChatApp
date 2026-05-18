@@ -11,6 +11,7 @@ const elements = {
   fileInput: document.querySelector("#fileInput"),
   uploadHint: document.querySelector("#uploadHint"),
   quotaBar: document.querySelector("#quotaBar"),
+  quotaPlan: document.querySelector("#quotaPlan"),
   quotaTotal: document.querySelector("#quotaTotal"),
   quotaUsed: document.querySelector("#quotaUsed"),
   quotaDrive: document.querySelector("#quotaDrive"),
@@ -19,6 +20,7 @@ const elements = {
 };
 
 const USER_STORAGE_LIMIT_BYTES = 100 * 1024 * 1024;
+const PREMIUM_STORAGE_LIMIT_BYTES = 200 * 1024 * 1024;
 
 const storageKeys = {
   apiBase: "cloudStorage.apiBase",
@@ -89,12 +91,15 @@ async function loadQuota() {
       headers: authHeaders(),
     });
     const quota = await response.json();
-    const limit = Number(quota.userLimit || USER_STORAGE_LIMIT_BYTES);
+    const plan = quota.plan || "free";
+    const fallbackLimit = plan === "premium" ? PREMIUM_STORAGE_LIMIT_BYTES : USER_STORAGE_LIMIT_BYTES;
+    const limit = Number(quota.userLimit || fallbackLimit);
     const usage = Number(quota.userUsage || 0);
     const remaining = Math.max(limit - usage, 0);
     const percent = limit > 0 ? Math.min((usage / limit) * 100, 100) : 0;
 
     elements.quotaBar.style.width = `${percent}%`;
+    elements.quotaPlan.textContent = formatPlan(plan);
     elements.quotaTotal.textContent = formatBytes(limit);
     elements.quotaUsed.textContent = formatBytes(usage);
     elements.quotaDrive.textContent = formatBytes(remaining);
@@ -240,6 +245,10 @@ function formatBytes(bytes) {
   const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / 1024 ** index;
   return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function formatPlan(plan) {
+  return plan === "premium" ? "Premium" : "Free";
 }
 
 function formatDate(value) {

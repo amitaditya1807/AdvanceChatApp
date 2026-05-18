@@ -23,9 +23,13 @@ GOOGLE_CLIENT_ID=your_google_oauth_client_id
 GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
 GOOGLE_REFRESH_TOKEN=your_refresh_token
 DRIVE_ROOT_FOLDER_ID=optional_drive_folder_id
+PREMIUM_USER_IDS=optional_comma_separated_jwt_user_ids
+PREMIUM_USER_EMAILS=optional_comma_separated_emails
 ```
 
-The service also accepts .NET-style names: `Jwt__Key`, `Jwt__Issuer`, `Jwt__Audience`, `Google__ClientId`, `Google__ClientSecret`, `Google__RefreshToken`, and `Google__DriveRootFolderId`.
+The service also accepts .NET-style names: `Jwt__Key`, `Jwt__Issuer`, `Jwt__Audience`, `Google__ClientId`, `Google__ClientSecret`, `Google__RefreshToken`, `Google__DriveRootFolderId`, `Premium__UserIds`, and `Premium__UserEmails`.
+
+Free users get 100 MB. Users listed in `PREMIUM_USER_IDS` or `PREMIUM_USER_EMAILS` get 200 MB. This is a no-database bridge until a payment gateway stores subscription state.
 
 The service loads `.env` automatically on startup. `.env.example` is only a sample file.
 
@@ -48,7 +52,7 @@ Authorization: Bearer <jwt-from-auth-service>
 Routes:
 
 - `GET /` health check
-- `GET /storage` Google Drive storage quota
+- `GET /storage` per-user plan and storage quota
 - `POST /files` multipart upload with field name `file`
 - `GET /files` list files owned by the current JWT user
 - `GET /files/{id}` download one owned file
