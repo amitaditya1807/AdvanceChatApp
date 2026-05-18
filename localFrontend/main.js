@@ -1,5 +1,8 @@
 const API_GATEWAY_URL = "https://localhost:7000";
 const TOKEN_KEY = "advanced_chat_jwt";
+const WAKE_RETRY_STATUSES = [502, 503, 504];
+const WAKE_RETRY_ATTEMPTS = 10;
+const WAKE_RETRY_DELAY_MS = 3000;
 
 const output = document.getElementById("output");
 const chatButton = document.getElementById("chatButton");
@@ -112,14 +115,16 @@ async function callChatService() {
     chatButton.disabled = true;
     output.textContent = "⏳ Checking ChatService...";
 
-    const response = await fetch(`${API_GATEWAY_URL}/chat`, {
-      headers: { Authorization: `Bearer ${token}` }
+    const { response, body } = await requestGateway("/chat", {
+      headers: { Authorization: `Bearer ${token}` },
+      onWakeRetry: (status, attempt, maxAttempts) => {
+        output.textContent = [
+          "Waiting for ChatService to wake up...",
+          `Gateway status: ${status}`,
+          `Attempt ${attempt + 1} of ${maxAttempts}`
+        ].join("\n");
+      }
     });
-
-    const text = await response.text();
-    const contentType = response.headers.get("content-type") || "";
-    let body = text;
-    try { body = text && contentType.includes("application/json") ? JSON.parse(text) : text; } catch {}
 
     if (!response.ok) {
       if (response.status === 401) {
@@ -135,7 +140,7 @@ async function callChatService() {
         return;
       }
       if ([502, 503, 504].includes(response.status)) {
-        output.textContent = `ChatService is not reachable through the gateway right now.\nStatus: ${response.status}\nTry again after the Render service finishes waking up.`;
+        output.textContent = `ChatService is still waking up.\nStatus: ${response.status}\nPlease try again in a moment.`;
         return;
       }
       output.textContent = `❌ ERROR:\nStatus: ${response.status}\n${typeof body === "string" ? body : JSON.stringify(body, null, 2)}`;
@@ -148,6 +153,37 @@ async function callChatService() {
   } finally {
     chatButton.disabled = false;
   }
+}
+
+async function requestGateway(path, options = {}) {
+  const { onWakeRetry, ...fetchOptions } = options;
+
+  for (let attempt = 0; attempt < WAKE_RETRY_ATTEMPTS; attempt++) {
+    const response = await fetch(`${API_GATEWAY_URL}${path}`, fetchOptions);
+    const body = await readResponseBody(response);
+
+    if (!WAKE_RETRY_STATUSES.includes(response.status) || attempt === WAKE_RETRY_ATTEMPTS - 1) {
+      return { response, body };
+    }
+
+    if (onWakeRetry) onWakeRetry(response.status, attempt, WAKE_RETRY_ATTEMPTS);
+    await sleep(WAKE_RETRY_DELAY_MS);
+  }
+}
+
+async function readResponseBody(response) {
+  const text = await response.text();
+  const contentType = response.headers.get("content-type") || "";
+
+  try {
+    return text && contentType.includes("application/json") ? JSON.parse(text) : text;
+  } catch {
+    return text;
+  }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function logout() {

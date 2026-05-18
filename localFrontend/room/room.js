@@ -1,5 +1,8 @@
 const API_GATEWAY_URL = "https://localhost:7000";
 const TOKEN_KEY = "advanced_chat_jwt";
+const WAKE_RETRY_STATUSES = [502, 503, 504];
+const WAKE_RETRY_ATTEMPTS = 10;
+const WAKE_RETRY_DELAY_MS = 3000;
 
 const output = document.getElementById("output");
 const chatButton = document.getElementById("chatButton");
@@ -99,7 +102,16 @@ async function callChatService() {
   try {
     chatButton.disabled = true;
     output.textContent = "⏳ Checking ChatService...";
-    const body = await apiRequest("/chat");
+    const body = await apiRequest("/chat", {
+      wakeRetry: true,
+      onWakeRetry: (status, attempt, maxAttempts) => {
+        output.textContent = [
+          "Waiting for ChatService to wake up...",
+          `Gateway status: ${status}`,
+          `Attempt ${attempt + 1} of ${maxAttempts}`
+        ].join("\n");
+      }
+    });
     output.textContent = `✅ ChatService reachable\n\n${JSON.stringify(body, null, 2)}`;
   } catch (error) {
     output.textContent = `❌ ERROR:\n${error.message}`;
@@ -213,18 +225,27 @@ async function deleteRoom(roomId) {
 }
 
 async function apiRequest(path, options = {}) {
-  const response = await fetch(`${API_GATEWAY_URL}${path}`, {
-    method: options.method || "GET",
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    },
-    body: options.body
-  });
-  const text = await response.text();
-  let body = text;
-  if (text) { try { body = JSON.parse(text); } catch {} }
+  const maxAttempts = options.wakeRetry ? WAKE_RETRY_ATTEMPTS : 1;
+  let response = null;
+  let body = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    response = await fetch(`${API_GATEWAY_URL}${path}`, {
+      method: options.method || "GET",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      },
+      body: options.body
+    });
+    body = await readResponseBody(response);
+
+    if (!WAKE_RETRY_STATUSES.includes(response.status) || attempt === maxAttempts - 1) break;
+    if (options.onWakeRetry) options.onWakeRetry(response.status, attempt, maxAttempts);
+    await sleep(WAKE_RETRY_DELAY_MS);
+  }
+
   if (!response.ok) {
     if (response.status === 401) {
       redirectHome("expired");
@@ -237,6 +258,21 @@ async function apiRequest(path, options = {}) {
     throw error;
   }
   return body || null;
+}
+
+async function readResponseBody(response) {
+  const text = await response.text();
+  if (!text) return "";
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function startRoomPolling() {
