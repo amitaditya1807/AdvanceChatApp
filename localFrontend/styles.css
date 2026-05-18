@@ -23,14 +23,14 @@ body {
 }
 
 .page {
-  width: min(1120px, calc(100% - 32px));
+  width: min(1040px, calc(100% - 40px));
   margin: 0 auto;
-  padding: 32px 0 42px;
+  padding: 48px 0 52px;
 }
 
 .panel {
   border: 1px solid var(--card-border);
-  border-radius: 22px;
+  border-radius: 18px;
   background: var(--card);
   box-shadow: 0 24px 80px rgba(2, 6, 23, 0.45);
   backdrop-filter: blur(18px);
@@ -38,9 +38,19 @@ body {
 
 .hero {
   display: grid;
-  grid-template-columns: 1.15fr 0.85fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
-  padding: 28px;
+  padding: 38px;
+}
+
+.hero__left {
+  width: min(780px, 100%);
+  margin: 0 auto;
+  text-align: center;
+}
+
+.hero .actions {
+  justify-content: center;
 }
 
 .eyebrow {
@@ -146,12 +156,17 @@ input {
   margin-bottom: 12px;
 }
 
-.grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 16px; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
 
 .mini-card {
   border: 1px solid var(--card-border);
-  border-radius: 16px;
-  padding: 14px;
+  border-radius: 14px;
+  padding: 18px;
   background: rgba(15, 23, 42, 0.58);
 }
 .mini-card strong { display: block; margin-bottom: 6px; }
@@ -192,4 +207,20 @@ pre {
 
 @media (max-width: 860px) {
   .hero { grid-template-columns: 1fr; }
+  .hero__left { text-align: left; }
+  .hero .actions { justify-content: flex-start; }
+  .grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 560px) {
+  .page {
+    width: min(100% - 24px, 1040px);
+    padding: 20px 0 30px;
+  }
+
+  .hero,
+  .chat-card,
+  .output-card {
+    padding: 18px;
+  }
 }
